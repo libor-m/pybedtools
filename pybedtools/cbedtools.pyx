@@ -11,6 +11,7 @@
 include "cbedtools.pxi"
 from cython.operator cimport dereference as deref
 import sys
+import subprocess
 
 
 class MalformedBedLineError(Exception):
@@ -391,6 +392,20 @@ cpdef Interval create_interval_from_list(list fields):
         pyb._bed = new BED(string(fields[0]), int(fields[3])-1, int(fields[4]), string(fields[2]),
                            string(fields[5]), string(fields[6]), list_to_vector(fields[7:]))
         pyb.file_type = 'gff'
+    elif len(fields) == 13 and (fields[1] + fields[3]).isdigit():
+        if int(fields[1]) & 0x0010:
+            strand = '-'
+        else:
+            strand = '+'
+        pyb._bed = new BED(string(fields[2]),
+                           int(fields[3])-1, 
+                           int(fields[3]) + len(fields[9]),
+                           string(fields[0]),
+                           string(fields[1]),
+                           string(strand),
+                           list_to_vector(fields))
+        pyb.file_type = 'sam'
+
     pyb._bed.fields = list_to_vector(orig_fields)
     return pyb
 
@@ -583,3 +598,25 @@ cdef class IntervalFile:
             return self.intervalFile_ptr.CountOverlapsPerBin(deref(interval._bed), overlap)
         else:
             return self.intervalFile_ptr.CountOverlapsPerBin(deref(interval._bed), same_strand, overlap)
+
+cdef class BAM(object):
+    cdef str fn
+    cdef object p
+    def __init__(self, fn, stream=False):
+        """
+        Wraps samtools to iterate over a BAM.
+        """
+        self.fn = fn
+        cmds = ['samtools', 'view', fn]
+        self.p = subprocess.Popen(cmds,
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE,
+                                  bufsize=1)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.p.stdout.next()
+
+
