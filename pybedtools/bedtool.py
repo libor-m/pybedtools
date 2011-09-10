@@ -10,8 +10,8 @@ import string
 from itertools import groupby, islice
 
 from pybedtools.helpers import get_tempdir, _tags,\
-    History, HistoryStep, call_bedtools, _flatten_list, \
-    _check_sequence_stderr, isBAM, BEDToolsError
+    History, HistoryStep, _flatten_list, _prog_names, call_bedtools, \
+    _check_sequence_stderr, isBAM, BEDToolsError, _cleanup_process
 from cbedtools import IntervalFile, IntervalIterator
 import pybedtools
 
@@ -172,9 +172,10 @@ def _wraps(prog=None, implicit=None, bam=None, other=None, uses_genome=False,
             cmds, tmp, stdin = self.handle_kwargs(prog=prog, **kwargs)
 
             # Do the actual call
-            stream = call_bedtools(cmds, tmp, stdin=stdin,
+            process, stream = call_bedtools(cmds, tmp, stdin=stdin,
                                    check_stderr=check_stderr)
             result = BedTool(stream)
+            result.process = process
 
             # Post-hoc editing of the BedTool -- for example, this is used for
             # the sequence methods to add a `seqfn` attribute to the resulting
@@ -307,6 +308,7 @@ class BedTool(object):
         self._hascounts = False
         self._file_type = None
         self.history = History()
+        self.process = None
 
         if self._isbam and isinstance(self.fn, basestring):
             self._bam_header = ''.join(BAM(self.fn, header_only=True))
@@ -1610,7 +1612,8 @@ class BedTool(object):
         return d
 
     def randomintersection(self, other, iterations, intersect_kwargs=None,
-                           shuffle_kwargs=None, debug=False):
+                           shuffle_kwargs=None, debug=False,
+                           report_iterations=False):
         """
         Performs *iterations* shufflings of self, each time intersecting with
         *other*.
@@ -1653,12 +1656,15 @@ class BedTool(object):
         for i in range(iterations):
             if debug:
                 shuffle_kwargs['seed'] = i
-            tmp = self.shuffle(**shuffle_kwargs)
-            tmp2 = tmp.intersect(other, **intersect_kwargs)
+                if report_iterations:
+                    sys.stderr.write('\r%s' % i)
+                    sys.stderr.flush()
+            tmp = self.shuffle(stream=True, **shuffle_kwargs)
+            tmp2 = tmp.intersect(other, stream=True, **intersect_kwargs)
 
             yield len(tmp2)
-            os.unlink(tmp.fn)
-            os.unlink(tmp2.fn)
+            _cleanup_process(tmp.process)
+            _cleanup_process(tmp2.process)
             del(tmp)
             del(tmp2)
 

@@ -301,7 +301,7 @@ def call_bedtools(cmds, tmpfn=None, stdin=None, check_stderr=None):
         print '\n\t' + '\n\t'.join(problems[err.errno])
         raise OSError('See above for commands that gave the error')
 
-    return output
+    return p, output
 
 
 def set_bedtools_path(path=""):
@@ -344,5 +344,24 @@ def _check_sequence_stderr(x):
     if x.startswith('index file'):
         return True
     return False
+
+
+def _cleanup_process(process):
+    """
+    Makes sure a process spawned by subprocess.Popen is good and dead, and
+    doesn't leave any filehandles open.
+
+    """
+    if process.stdin:
+        process.stdin.close()
+
+    if process.stdout:
+        process.stdout.close()
+
+    if process.stderr:
+        process.stderr.close()
+
+    process.kill()
+
 
 atexit.register(cleanup)
