@@ -1,6 +1,7 @@
 import tempfile
 import shutil
 import subprocess
+import multiprocessing
 import inspect
 from math import floor, ceil
 import os
@@ -11,7 +12,8 @@ from itertools import groupby, islice
 
 from pybedtools.helpers import get_tempdir, _tags,\
     History, HistoryStep, _flatten_list, _prog_names, call_bedtools, \
-    _check_sequence_stderr, isBAM, BEDToolsError, _cleanup_process
+    _check_sequence_stderr, isBAM, BEDToolsError, _cleanup_process, \
+    _call_randomintersect
 from cbedtools import IntervalFile, IntervalIterator
 import pybedtools
 
@@ -1613,7 +1615,7 @@ class BedTool(object):
 
     def randomintersection(self, other, iterations, intersect_kwargs=None,
                            shuffle_kwargs=None, debug=False,
-                           report_iterations=False):
+                           report_iterations=False, processes=1):
         """
         Performs *iterations* shufflings of self, each time intersecting with
         *other*.
@@ -1631,7 +1633,9 @@ class BedTool(object):
         use the "seed" kwarg, that seed will be used *each* time shuffleBed is
         called -- so all your randomization results will be identical for each
         iteration.  To get around this and to allow for tests, debug=True will
-        set the seed to the iteration number.
+        set the seed to the iteration number.  You may also break up the
+        intersections across multiple processes with *processes* > 1.
+        
 
         Example usage:
 
@@ -1644,6 +1648,20 @@ class BedTool(object):
             [2, 2, 2, 0, 2, 3, 2, 1, 2, 3]
 
         """
+        if processes > 1:
+            p = multiprocessing.Pool(processes)
+            iterations_each = [iterations / processes] * processes
+            iterations_each[-1] += iterations % processes
+            results = [p.apply_async(_call_randomintersect, (self, other, it),
+                              dict(intersect_kwargs=intersect_kwargs,
+                                   shuffle_kwargs=shuffle_kwargs,
+                                   debug=debug,
+                                   report_iterations=report_iterations))
+                 for it in iterations_each]
+            for r in results:
+                for value in r.get():
+                    yield value
+            raise StopIteration
 
         if shuffle_kwargs is None:
             shuffle_kwargs = {}
@@ -1851,7 +1869,6 @@ class BedTool(object):
         else:
             fn = self.fn
         return IntervalFile(fn)
-
 
 class BAM(object):
     def __init__(self, stream, header_only=False):

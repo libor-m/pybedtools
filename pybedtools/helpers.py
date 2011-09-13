@@ -365,3 +365,16 @@ def _cleanup_process(process):
 
 
 atexit.register(cleanup)
+
+
+def _call_randomintersect(_self, other, iterations, intersect_kwargs,
+                          shuffle_kwargs, debug, report_iterations):
+    """
+    Helper function that list-ifies the output from randomintersection, s.t.
+    it can be pickled across a multiprocess Pool.
+    """
+    return list(_self.randomintersection(other, iterations,
+                                        intersect_kwargs=intersect_kwargs,
+                                        shuffle_kwargs=shuffle_kwargs,
+                                        report_iterations=report_iterations,
+                                        debug=False, processes=1))
