@@ -7,35 +7,20 @@ import copy_reg
 import logging
 import scripts
 from cbedtools import Interval, IntervalFile, overlap, \
-                    create_interval_from_list, Attributes, \
-                    MalformedBedLineError, IntervalIterator
+    create_interval_from_list, Attributes, \
+    MalformedBedLineError, IntervalIterator
 from _Window import Window
 from helpers import get_tempdir, set_tempdir, cleanup, \
-                    find_tagged, set_bedtools_path, set_samtools_path
+    find_tagged, set_bedtools_path, set_samtools_path
 import helpers
 from bedtool import BedTool
 import genome_registry
+import stats
 from __main__ import main
 from version import __version__
 
-_bedtools_path = ""
-_samtools_path = ""
-_tabix_path = ""
-_R_path = ""
+import settings
 
-tempfile_prefix = 'pybedtools.'
-tempfile_suffix = '.tmp'
-
-
-# Checking for BEDTools will happen when creating the first BedTool; other
-# checks happen at first use (BAM object creation; tabix-ing a BedTool)
-_bedtools_installed = False
-_samtools_installed = False
-_tabix_installed = False
-_R_installed = False
-
-KEEP_TEMPFILES = False
-_DEBUG = True
 example_files = ['a.bed.', 'b.bed', 'test.fa', 'a.bam']
 
 logger = logging.getLogger(__name__)
@@ -63,9 +48,10 @@ def debug_mode(x):
         ch.setLevel(logging.DEBUG)
         _DEBUG = True
         KEEP_TEMPFILES = True
-        logger.info('Debug mode enabled.  You may also want to set '
-                'pybedtools.KEEP_TEMPFILES=True to prevent automatic deletion '
-                'of files upon exit.')
+        logger.info(
+            'Debug mode enabled.  You may also want to set '
+            'pybedtools.KEEP_TEMPFILES=True to prevent automatic deletion '
+            'of files upon exit.')
     else:
         logger.setLevel(logging.INFO)
         ch.setLevel(logging.INFO)
@@ -74,11 +60,11 @@ def debug_mode(x):
         logger.info('Debug mode disabled')
 
 
-def check_for_bedtools(program_to_check="intersectBed"):
+def check_for_bedtools(program_to_check="intersectBed", force_check=False):
     """
     For backwards compatibility; please use helpers._check_for_bedtools()
     """
-    return helpers._check_for_bedtools(program_to_check)
+    return helpers._check_for_bedtools(program_to_check, force_check)
 
 
 # Allow Interval objects to be pickled -- required if you want to pass them
@@ -118,10 +104,10 @@ def load_path_config(fn):
     paths). This is used primarily for testing.
     """
     setters = dict(
-            bedtools=helpers.set_bedtools_path,
-            samtools=helpers.set_samtools_path,
-            r=helpers.set_R_path,
-            tabix=helpers.set_tabix_path)
+        bedtools=helpers.set_bedtools_path,
+        samtools=helpers.set_samtools_path,
+        r=helpers.set_R_path,
+        tabix=helpers.set_tabix_path)
 
     if isinstance(fn, dict):
         for prog, setter in setters.items():
@@ -235,7 +221,7 @@ def chromsizes(genome):
         return get_chromsizes_from_ucsc(genome)
 
 
-def chromsizes_to_file(chromsizes, fn=None):
+def chromsizes_to_file(chrom_sizes, fn=None):
     """
     Converts a *chromsizes* dictionary to a file.  If *fn* is None, then a
     tempfile is created (which can be deleted with pybedtools.cleanup()).
@@ -248,8 +234,10 @@ def chromsizes_to_file(chromsizes, fn=None):
         tmpfn = tmpfn.name
         BedTool.TEMPFILES.append(tmpfn)
         fn = tmpfn
+    if isinstance(chrom_sizes, basestring):
+        chrom_sizes = chromsizes(chrom_sizes)
     fout = open(fn, 'w')
-    for chrom, bounds in sorted(chromsizes.items()):
+    for chrom, bounds in sorted(chrom_sizes.items()):
         line = chrom + '\t' + str(bounds[1]) + '\n'
         fout.write(line)
     fout.close()

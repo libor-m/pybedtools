@@ -1,6 +1,18 @@
 # cython: profile=True
 #
 from cbedtools cimport Interval
+from cbedtools import create_interval_from_list
+
+
+cpdef extend_fields(Interval feature, int n):
+    """
+    Pads the fields of the feature with "." to a total length of `n` fields,
+    """
+    fields = feature.fields[:]
+    while len(fields) < n:
+        fields.append('.')
+    return create_interval_from_list(fields)
+
 
 cpdef center(Interval feature, int width=100):
     """
@@ -19,6 +31,17 @@ cpdef center(Interval feature, int width=100):
     if halfwidth == 0:
         halfwidth = 1
     feature.stop = center + halfwidth
+    return feature
+
+
+cpdef midpoint(Interval feature):
+    """
+    Specialized version of `center()` that just returns the single-bp midpoint
+    """
+    start = feature.start + (feature.stop - feature.start) / 2
+    stop = start
+    feature.start = start
+    feature.stop = stop
     return feature
 
 
@@ -62,6 +85,7 @@ cpdef rename(Interval feature, str name):
     feature.name = name
     return feature
 
+
 cpdef bedgraph_scale(Interval feature, float scalar):
     feature[3] = str(float(feature[3]) * scalar)
     return feature
@@ -88,6 +112,14 @@ cpdef TSS(Interval feature, int upstream=500, int downstream=500, add_to_name=No
     Returns the 5'-most coordinate, plus `upstream` and `downstream` bp; adds
     the string `add_to_name` to the feature's name if provided (e.g., "_TSS")
     """
+    return five_prime(feature, upstream, downstream, add_to_name)
+
+
+cpdef five_prime(Interval feature, int upstream=500, int downstream=500, add_to_name=None):
+    """
+    Returns the 5'-most coordinate, plus `upstream` and `downstream` bp; adds
+    the string `add_to_name` to the feature's name if provided (e.g., "_TSS")
+    """
     if feature.strand == '-':
         start = feature.stop - downstream
         stop = feature.stop + upstream
@@ -101,3 +133,78 @@ cpdef TSS(Interval feature, int upstream=500, int downstream=500, add_to_name=No
             pass
     feature.start, feature.stop = safe_start_stop(start, stop)
     return feature
+
+
+cpdef three_prime(Interval feature, int upstream=500, int downstream=500, add_to_name=None):
+    """
+    Returns the 3'-most coordinate, plus `upstream` and `downstream` bp; adds
+    the string `add_to_name` to the feature's name if provided (e.g.,
+    "_polyA-site")
+    """
+    if feature.strand == '-':
+        start = feature.start - downstream
+        stop = feature.start + upstream
+    else:
+        start = feature.stop - upstream
+        stop = feature.stop + downstream
+    if add_to_name:
+        try:
+            feature.name += add_to_name
+        except AttributeError:
+            pass
+    feature.start, feature.stop = safe_start_stop(start, stop)
+    return feature
+
+cpdef add_color(Interval feature, cmap, norm):
+    """
+    Signature:
+
+        add_color(feature, cmap, norm)
+
+    Given the matplotlib colormap `cmap` and the matplotlib Normalize instance
+    `norm`, return a new 9-field feature (extended out if needed) with the RGB
+    tuple set according to the score.
+    """
+    if len(feature.fields) < 9:
+        feature = extend_fields(feature, 9)
+        feature[6] = str(feature.start)
+        feature[7] = str(feature.stop)
+
+    rgb_float = cmap(norm(float(feature.score)))
+    feature[8] = ','.join([str(int(i * 255)) for i in rgb_float[:3]])
+    return feature
+
+
+cpdef gff2bed(Interval feature, name_field=None):
+    """
+    Signature:
+
+        gff2bed(feature, name_field=None)
+
+    Converts a GFF feature into a BED6 feature.  By default, the name of the
+    new BED will be feature.name, but if `name_field` is provided then the name
+    of the new BED will be feature.attrs[name_field].
+
+    `name_field` can also be an integer to index into the fields of the object,
+    so if you want the BED name to be the GFF featuretype, then you can use
+    `name_field=2`.
+
+    If the specified field does not exist, then "." will be used for the name.
+    """
+    if name_field is None:
+        name = feature.name
+    else:
+        try:
+            if isinstance(name_field, basestring):
+                name = feature.attrs[name_field]
+            if isinstance(name_field, int):
+                name = feature[name_field]
+        except (NameError, KeyError):
+            name = "."
+    return create_interval_from_list([
+        str(feature.chrom),
+        str(feature.start),
+        str(feature.stop),
+        name,
+        feature.score,
+        feature.strand])

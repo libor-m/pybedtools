@@ -115,6 +115,16 @@ def test_tabix():
     chr1	100	200	feature2	0	+
     chr1	150	500	feature3	0	-""")
 
+    # clean up
+    fns = [
+            pybedtools.example_filename('a.bed.gz'),
+            pybedtools.example_filename('a.bed.gz.tbi'),
+          ]
+    for fn in fns:
+        if os.path.exists(fn):
+            os.unlink(fn)
+
+
 
 # ----------------------------------------------------------------------------
 # Streaming and non-file BedTool tests
@@ -692,7 +702,7 @@ def test_randomstats():
         results = a.randomstats(b, 100, debug=True)
         assert results['actual'] == 3
         assert results['median randomized'] == 2.0
-        assert results['percentile'] == 91.5
+        assert results['percentile'] == 89.5
 
     except ImportError:
         # allow doctests to pass if SciPy not installed
@@ -892,17 +902,34 @@ def test_bam_to_sam_to_bam():
     a = pybedtools.example_bedtool('gdc.bam')
     orig = str(a)
     assert a.file_type == 'bam'
-    b = a.saveas('ex.sam')
-    assert b.file_type == 'sam'
+
+    # saveas should maintain BAM format
+    b = a.saveas()
+    assert b.file_type == 'bam'
+
+    # Converting to string gets SAM format
     assert str(b) == orig
+
+    # b is a bam; to_bam should return a bam
     c = b.to_bam(genome='dm3')
     assert c.file_type == 'bam'
-    print 'c:'
-    print c
-    print c.fn
-    assert str(c) == orig
-    if os.path.exists('ex.sam'):
-        os.unlink('ex.sam')
+
+    # in fact, it should be the same file:
+    assert c.fn == b.fn
+
+    # In order to get SAM format, need to print to file.
+    d = open(pybedtools.BedTool._tmp(), 'w')
+    d.write(str(c))
+    d.close()
+    d = pybedtools.BedTool(d.name)
+    assert d.file_type == 'sam'
+
+    e = d.to_bam(genome='dm3')
+    assert e.file_type == 'bam'
+
+    # everybody should be the same
+    assert a == b == c == d == e
+
 
 def test_bam_filetype():
     # regression test -- this was segfaulting before because IntervalFile
@@ -1027,6 +1054,79 @@ def test_tss():
     chr1	897	905	feature4_TSS	0	+
     """)
 
+def test_extend_fields():
+    a = pybedtools.example_bedtool('a.bed')
+    results = str(a.each(featurefuncs.extend_fields, 8))
+    print results
+    assert results == fix("""
+    chr1	1	100	feature1	0	+	.	.
+    chr1	100	200	feature2	0	+	.	.
+    chr1	150	500	feature3	0	-	.	.
+    chr1	900	950	feature4	0	+	.	.
+    """)
+
+def test_gff2bed():
+    a = pybedtools.example_bedtool('d.gff')
+    results = str(a.each(featurefuncs.gff2bed, name_field='Parent'))
+    assert results == fix("""
+    chr1	49	300	.	.	+
+    chr1	49	300	gene1	.	+
+    chr1	74	150	mRNA1	.	+
+    chr1	199	275	mRNA1	.	+
+    chr1	1199	1275	.	.	+""")
+
+
+    results = str(a.each(featurefuncs.gff2bed))
+    assert results == fix("""
+    chr1	49	300	gene1	.	+
+    chr1	49	300	mRNA1	.	+
+    chr1	74	150	CDS1	.	+
+    chr1	199	275	CDS2	.	+
+    chr1	1199	1275	rRNA1	.	+
+    """)
+
+    results = str(a.each(featurefuncs.gff2bed, name_field="nonexistent"))
+    assert results == fix("""
+    chr1	49	300	.	.	+
+    chr1	49	300	.	.	+
+    chr1	74	150	.	.	+
+    chr1	199	275	.	.	+
+    chr1	1199	1275	.	.	+
+    """)
+
+    results = str(a.each(featurefuncs.gff2bed, name_field=1))
+    print results
+    assert results == fix("""
+    chr1	49	300	fake	.	+
+    chr1	49	300	fake	.	+
+    chr1	74	150	fake	.	+
+    chr1	199	275	fake	.	+
+    chr1	1199	1275	fake	.	+""")
+
+
+def test_add_color():
+    try:
+        from matplotlib import cm
+    except ImportError:
+        print "matplotlib not installed; skipping test_add_color"
+        return
+
+    def modify_scores(f):
+        fields = f.fields
+        fields[4] = str(f[2])
+        return pybedtools.create_interval_from_list(fields)
+    a = pybedtools.example_bedtool('a.bed')
+    a = a.each(modify_scores).saveas()
+    cmap = cm.jet
+    norm = a.colormap_normalize()
+    results = str(a.each(featurefuncs.add_color, cmap=cmap, norm=norm))
+    print results
+    assert results == fix("""
+    chr1	1	100	feature1	100	+	1	100	0,0,127
+    chr1	100	200	feature2	200	+	100	200	0,0,255
+    chr1	150	500	feature3	500	-	150	500	99,255,147
+    chr1	900	950	feature4	950	+	900	950	127,0,0""")
+
 
 
 #------------------------------------------------------------------------------
@@ -1134,29 +1234,32 @@ def test_random():
     a = pybedtools.BedTool()
     result = a.random(l=10, n=10, genome='hg19', seed=1)
     assert result == fix("""
-    chrX	71897396	71897406	1	10	+
-    chr15	91866877	91866887	2	10	-
-    chr22	4961862	4961872	3	10	-
-    chr1	35524746	35524756	4	10	+
-    chr17	33430614	33430624	5	10	+
-    chr2	74764380	74764390	6	10	+
-    chr2	13039576	13039586	7	10	-
-    chr10	45451946	45451956	8	10	+
-    chr14	92167770	92167780	9	10	-
-    chr18	3196571	3196581	10	10	-
+    chr3	11945098	11945108	1	10	+
+    chr15	84985693	84985703	2	10	-
+    chr2	62691196	62691206	3	10	-
+    chr18	18871346	18871356	4	10	+
+    chr9	133374407	133374417	5	10	+
+    chr9	48958184	48958194	6	10	+
+    chrY	41568406	41568416	7	10	-
+    chr4	16579517	16579527	8	10	+
+    chr1	76589882	76589892	9	10	-
+    chr3	55995799	55995809	10	10	-
     """)
 
 def test_links():
     # have to be careful about the path, since it is embedded in the HTML
-    # output.
-    a = pybedtools.BedTool(
-            os.path.join(
-                os.path.relpath(pybedtools.data_dir()),
-                'a.bed'))
+    # output -- so make a copy of the example file, and delete when done.
+    os.system('cp %s a.links.bed' % pybedtools.example_filename('a.bed'))
+    a = pybedtools.BedTool('a.links.bed')
     a = a.links()
     exp = open(pybedtools.example_filename('a.links.html')).read()
     obs = open(a.links_html).read()
+    print exp
+    print obs
     assert exp == obs
+    os.unlink('a.links.bed')
+
+
 
 def test_igv():
     a = pybedtools.example_bedtool('a.bed')
@@ -1171,3 +1274,51 @@ def test_bam_to_fastq():
     y = x.bam_to_fastq(fq=tmpfn)
     assert open(y.fastq).read() == open(pybedtools.example_filename('small.fastq')).read()
 
+def test_window():
+    x = pybedtools.BedTool()
+    z = x.window_maker(genome='hg19', w=100000)
+    assert str(z[0]) == "chr1\t0\t100000\n"
+    assert str(z[10000]) == 'chr16\t20800000\t20900000\n'
+
+def test_gtf_gff_attrs():
+    # smoke test.
+    #
+    # this has always worked:
+    gff = ["chr1","fake","mRNA","51", "300",".", "+",".","ID=mRNA1;Parent=gene1;"]
+    gff = pybedtools.create_interval_from_list(gff)
+    gff.attrs
+
+    # this previously failed because of the "=" in the attr string.
+    gff = ['scaffold_52', 'Cufflinks', 'exon', '5478', '5568', '.', '+', '.', 'gene_id "XLOC_017766"; transcript_id "TCONS_00033979"; exon_number "6"; gene_name "g18412"; oId "PAC:26897502"; nearest_ref "PAC:26897502"; class_code "="; tss_id "TSS21210"; p_id "P18851";']
+    gff = pybedtools.create_interval_from_list(gff)
+    gff.attrs
+
+    # TODO: is it necessary to support GFF vs GTF detection in this case:
+    #
+    #   GFF:
+    #           class_code=" "
+    #
+    #   GTF:
+    #           class_code "="
+
+
+def test_jaccard():
+    x = pybedtools.example_bedtool('a.bed')
+
+    results = x.jaccard(pybedtools.example_bedtool('b.bed'))
+    assert results == {'intersection': 46, 'union': 649, 'jaccard': 0.0708783, 'n_intersections': 2}, results
+
+    results2 = x.jaccard(pybedtools.example_bedtool('b.bed'), stream=True)
+    assert results == results2, results2
+
+def test_reldist():
+    x = pybedtools.example_bedtool('a.bed')
+    results = x.reldist(pybedtools.example_bedtool('b.bed'))
+    assert results == {'reldist': [0.15, 0.21, 0.28], 'count': [1, 1, 1], 'total': [3, 3, 3], 'fraction': [0.333, 0.333, 0.333]}, results
+
+    results2 = x.reldist(pybedtools.example_bedtool('b.bed'), detail=True)
+    print results2
+    assert results2 == fix("""
+    chr1	1	100	feature1	0	+	0.282
+    chr1	100	200	feature2	0	+	0.153
+    chr1	150	500	feature3	0	-	0.220""")

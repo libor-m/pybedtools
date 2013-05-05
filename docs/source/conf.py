@@ -27,7 +27,9 @@ from pybedtools import __version__ as version
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.autosummary', 'sphinx.ext.doctest', 'sphinx.ext.todo', 'sphinx.ext.coverage','sphinx.ext.viewcode']
+extensions = ['sphinx.ext.autodoc', 'sphinx.ext.autosummary',
+              'sphinx.ext.doctest', 'sphinx.ext.todo',
+              'sphinx.ext.coverage','sphinx.ext.viewcode', 'numpydoc']
 
 doctest_test_doctest_blocks = 'default'
 
@@ -113,7 +115,7 @@ html_theme = 'nature'
 #html_theme_options = {}
 
 # Add any paths that contain custom themes here, relative to this directory.
-#html_theme_path = []
+#html_theme_path = ['_themes']
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".

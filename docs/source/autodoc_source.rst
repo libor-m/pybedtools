@@ -77,6 +77,8 @@ program are indicated.
     pybedtools.BedTool.nucleotide_content
     pybedtools.BedTool.multi_bam_coverage
     pybedtools.BedTool.tag_bam
+    pybedtools.BedTool.jaccard
+    pybedtools.BedTool.reldist
     pybedtools.BedTool.overlap
     pybedtools.BedTool.links
     pybedtools.BedTool.igv
@@ -103,6 +105,21 @@ on the fly.
     pybedtools.BedTool.split
     pybedtools.BedTool.truncate_to_chrom
     pybedtools.BedTool.remove_invalid
+
+The :mod:`pybedtools.featurefuncs` module contains some commonly-used functions
+that can be passed to :meth:`BedTool.each`:
+
+.. autosummary::
+    :toctree:
+
+    pybedtools.featurefuncs.three_prime
+    pybedtools.featurefuncs.five_prime
+    pybedtools.featurefuncs.TSS
+    pybedtools.featurefuncs.extend_fields
+    pybedtools.featurefuncs.center
+    pybedtools.featurefuncs.midpoint
+    pybedtools.featurefuncs.normalized_to_length
+    pybedtools.featurefuncs.rename
 
 
 Searching for features
@@ -148,9 +165,11 @@ distributions between interval files.
 .. autosummary::
     :toctree: autodocs
 
+    pybedtools.BedTool.random_op
     pybedtools.BedTool.randomstats
     pybedtools.BedTool.randomintersection
     pybedtools.BedTool.random_subset
+    pybedtools.BedTool.random_jaccard
 
 Managing :class:`BedTool` objects on disk
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -180,6 +199,7 @@ Methods that can't quite be categorized into the above sections.
     pybedtools.BedTool.set_chromsizes
     pybedtools.BedTool.print_sequence
     pybedtools.BedTool.save_seqs
+    pybedtools.BedTool.liftover
 
 Module-level functions
 ----------------------
@@ -236,23 +256,56 @@ functions help manage these files.
     pybedtools.chromsizes
     pybedtools.chromsizes_to_file
 
+
+Performing operations in parallel (multiprocessing)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: autodocs
+
+    pybedtools.parallel.parallel_apply
+
 :mod:`pybedtools.contrib`
 -------------------------
 The :mod:`pybedtools.contrib` module contains higher-level code that leverages
 :class:`BedTool` objects for common analyses.
 
 
-:class:`Classifier`
-~~~~~~~~~~~~~~~~~~~
-An example use-case of the :class:`Classifier` class would be to determine the
+Plotting
+~~~~~~~~
+Plotting results from BEDTools/pybedtools operations is very useful for
+exploring and understanding the tools as well as for teaching purposes.
+
+.. autosummary::
+    :toctree: autodocs
+
+    pybedtools.contrib.plotting.Track
+    pybedtools.contrib.plotting.TrackCollection
+    pybedtools.contrib.plotting.binary_heatmap
+    pybedtools.contrib.plotting.binary_summary
+    pybedtools.contrib.plotting.BedToolsDemo
+    pybedtools.contrib.plotting.ConfiguredBedToolsDemo
+
+
+
+
+Creating a bigWig file
+~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: autodocs
+
+    pybedtools.contrib.bigwig.bam_to_bigwig
+
+:class:`MultiClassifier`
+~~~~~~~~~~~~~~~~~~~~~~~~
+An example use-case of the :class:`MultiClassifier` class would be to determine the
 distribution of ChIP-seq peaks in introns/exons/intergenic space.
 
 .. autosummary::
     :toctree: autodocs
 
-    pybedtools.contrib.Classifier
-    pybedtools.contrib.Classifier.classify
-    pybedtools.contrib.Classifier.available_featuretypes
+    pybedtools.contrib.MultiClassifier
+    pybedtools.contrib.MultiClassifier.classify
+    pybedtools.contrib.MultiClassifier.print_table
 
 :class:`IntersectionMatrix`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

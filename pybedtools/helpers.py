@@ -9,126 +9,95 @@ import struct
 import atexit
 import pybedtools
 
-# Check calls against these names to only allow calls to known BEDTools
-# programs (basic security)
-_prog_names = (
-# Genome arithmetic
-'intersectBed',
-'windowBed',
-'closestBed',
-'coverageBed',
-'mapBed',
-'genomeCoverageBed',
-'mergeBed',
-'clusterBed',
-'complementBed',
-'subtractBed',
-'slopBed',
-'flankBed',
-'sortBed',
-'randomBed',
-'shuffleBed',
-'annotateBed',
+import settings
 
-# multi-way
-'multiIntersectBed',
-'unionBedGraphs',
-
-# PE
-'pairToBed',
-'pairToPair',
-
-# format conversion
-'bamToBed',
-'bedToBam',
-'bedpeToBam',
-'bed12ToBed6',
-'bamToFastq',
-
-# fasta
-'fastaFromBed',
-'maskFastaFromBed',
-'nucBed',
-
-# bam-centric
-'multiBamCov',
-'tagBam',
-
-# misc
-'getOverlap',
-'bedToIgv',
-'linksBed',
-'windowMaker',
-'groupBy',
-'expandCols',
-)
 
 _tags = {}
 
 
-def _check_for_bedtools(program_to_check='intersectBed'):
+def _check_for_bedtools(program_to_check='intersectBed', force_check=False):
+    """
+    Checks installation as well as version (based on whether or not "bedtools
+    intersect" works, or just "intersectBed")
+    """
+    if settings._bedtools_installed and not force_check:
+        return True
+
     try:
         p = subprocess.Popen(
-                [os.path.join(pybedtools._bedtools_path, program_to_check)],
+            [os.path.join(settings._bedtools_path, 'bedtools'),
+             settings._prog_names[program_to_check]],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        settings._bedtools_installed = True
+        settings._v_2_15_plus = True
+
+    except (OSError, KeyError) as err:
+
+        try:
+            p = subprocess.Popen(
+                [os.path.join(settings._bedtools_path, program_to_check)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        pybedtools._bedtools_installed = True
-    except OSError as err:
-        if err.errno == 2:
-            if pybedtools._bedtools_path:
-                add_msg = "(tried path '%s')" % pybedtools._bedtools_path
-            else:
-                add_msg = ""
-            raise OSError("Please make sure you have installed BEDTools"
-                          "(https://github.com/arq5x/bedtools) and that "
-                          "it's on the path. %s" % add_msg)
+            settings._bedtools_installed = True
+            settings._v_2_15_plus = False
+
+        except OSError as err:
+            if err.errno == 2:
+                if settings._bedtools_path:
+                    add_msg = "(tried path '%s')" % settings._bedtools_path
+                else:
+                    add_msg = ""
+                raise OSError("Please make sure you have installed BEDTools"
+                              "(https://github.com/arq5x/bedtools) and that "
+                              "it's on the path. %s" % add_msg)
 
 
 def _check_for_tabix():
     try:
         p = subprocess.Popen(
-                [os.path.join(pybedtools._tabix_path, 'tabix')],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            [os.path.join(settings._tabix_path, 'tabix')],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
-        pybedtools._tabix_installed = True
+        settings._tabix_installed = True
     except OSError:
-        if pybedtools._tabix_path:
-            add_msg = "(tried path '%s')" % pybedtools._tabix_path
+        if settings._tabix_path:
+            add_msg = "(tried path '%s')" % settings._tabix_path
         else:
             add_msg = ""
         raise ValueError(
-                'Please install tabix and ensure it is on your path %s'
-                % add_msg)
+            'Please install tabix and ensure it is on your path %s'
+            % add_msg)
 
 
 def _check_for_samtools():
     try:
         p = subprocess.Popen(
-            [os.path.join(pybedtools._samtools_path, 'samtools')],
+            [os.path.join(settings._samtools_path, 'samtools')],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        pybedtools._samtools_installed = True
+        settings._samtools_installed = True
     except OSError:
-        if pybedtools._samtools_path:
-            add_msg = "(tried path '%s')" % pybedtools._samtools_path
+        if settings._samtools_path:
+            add_msg = "(tried path '%s')" % settings._samtools_path
         else:
             add_msg = ""
         raise ValueError(
-                'Please install samtools and ensure it is on your path %s'
-                % add_msg)
+            'Please install samtools and ensure it is on your path %s'
+            % add_msg)
+
 
 def _check_for_R():
     try:
         p = subprocess.Popen(
-            [os.path.join(pybedtools._R_path, 'R'), '--version'],
+            [os.path.join(settings._R_path, 'R'), '--version'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        pybedtools._R_installed = True
+        settings._R_installed = True
     except OSError:
-        if pybedtools._R_path:
-            add_msg = "(tried path '%s')" % pybedtools._R_path
+        if settings._R_path:
+            add_msg = "(tried path '%s')" % settings._R_path
         else:
             add_msg = ""
         raise ValueError(
-                'Please install R and ensure it is on your path %s'
-                % add_msg)
+            'Please install R and ensure it is on your path %s' % add_msg)
+
 
 class Error(Exception):
     """Base class for this module's exceptions"""
@@ -136,7 +105,14 @@ class Error(Exception):
 
 
 class BEDToolsError(Error):
-    pass
+    def __init__(self, cmd, msg):
+        self.cmd = str(cmd)
+        self.msg = str(msg)
+
+    def __str__(self):
+        m = '\nCommand was:\n\n\t' + self.cmd + '\n' + \
+            '\nError message was:\n' + self.msg
+        return m
 
 
 def isBGZIP(fn):
@@ -162,21 +138,25 @@ def isBAM(fn):
 
     # Need to differentiate between BAM and plain 'ol BGZIP. Try reading header
     # . . .
-    if not pybedtools._samtools_installed:
+    if not settings._samtools_installed:
         _check_for_samtools()
 
     cmds = ['samtools', 'view', '-H', fn]
     try:
-        p = subprocess.Popen(
-                cmds, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = p.communicate()
-        if stderr:
-            return False
 
+        # Silence the output, we want to check the return code
+        with open(os.devnull, "w") as out:
+            subprocess.check_call(cmds, stdout=out, stderr=out)
         return True
+
+    except subprocess.CalledProcessError:
+        # Non-0 return code, it means we have an error
+        return False
+
     except OSError:
-        raise OSError('SAMtools (http://samtools.sourceforge.net/) '
-                          'needs to be installed for BAM support')
+        raise OSError(
+            'SAMtools (http://samtools.sourceforge.net/) '
+            'needs to be installed for BAM support')
 
 
 def find_tagged(tag):
@@ -261,10 +241,9 @@ class HistoryStep(object):
 
         # Format args and kwargs
         args_string = ','.join(map(self._clean_arg, self.args))
-        kwargs_string = ','.join(['%s=%s' % \
-                        (i[0], self._clean_arg(i[1])) \
-                        for i in self.kwargs.items()])
-
+        kwargs_string = ','.join(
+            ['%s=%s' % (i[0], self._clean_arg(i[1]))
+             for i in self.kwargs.items()])
         # stick a comma on the end if there's something here
         if len(args_string) > 0:
             args_string += ', '
@@ -292,7 +271,7 @@ def get_tempdir():
     """
     Gets the current tempdir for the module.
     """
-    return tempfile.tempdir
+    return tempfile.gettempdir()
 
 
 def cleanup(verbose=False, remove_all=False):
@@ -305,7 +284,7 @@ def cleanup(verbose=False, remove_all=False):
     If *remove_all*, then ALL files matching "pybedtools.*.tmp" in the temp dir
     will be deleted.
     """
-    if pybedtools.KEEP_TEMPFILES:
+    if settings.KEEP_TEMPFILES:
         return
     for fn in pybedtools.BedTool.TEMPFILES:
         if verbose:
@@ -316,6 +295,21 @@ def cleanup(verbose=False, remove_all=False):
         fns = glob.glob(os.path.join(get_tempdir(), 'pybedtools.*.tmp'))
         for fn in fns:
             os.unlink(fn)
+
+
+def _version_2_15_plus_names(prog_name):
+    if not settings._bedtools_installed:
+        _check_for_bedtools()
+    if not settings._v_2_15_plus:
+        return [prog_name]
+    try:
+        prog_name = settings._prog_names[prog_name]
+    except KeyError:
+        if prog_name in settings._new_names:
+            pass
+        raise BEDToolsError(
+            prog_name, prog_name + 'not a recognized BEDTools program')
+    return [os.path.join(settings._bedtools_path, 'bedtools'), prog_name]
 
 
 def call_bedtools(cmds, tmpfn=None, stdin=None, check_stderr=None):
@@ -338,20 +332,19 @@ def call_bedtools(cmds, tmpfn=None, stdin=None, check_stderr=None):
     input_is_stream = stdin is not None
     output_is_stream = tmpfn is None
 
-    if cmds[0] not in _prog_names:
-        raise BEDToolsError('"%s" not a recognized BEDTools program' % cmds[0])
-
-    # use specifed path, "" by default
-    cmds[0] = os.path.join(pybedtools._bedtools_path, cmds[0])
+    _orig_cmds = cmds[:]
+    cmds = []
+    cmds.extend(_version_2_15_plus_names(_orig_cmds[0]))
+    cmds.extend(_orig_cmds[1:])
 
     try:
         # coming from an iterator, sending as iterator
         if input_is_stream and output_is_stream:
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): input is stream, output is '
-                    'stream')
+                'helpers.call_bedtools(): input is stream, output is '
+                'stream')
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
+                'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
             p = subprocess.Popen(cmds,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE,
@@ -369,9 +362,9 @@ def call_bedtools(cmds, tmpfn=None, stdin=None, check_stderr=None):
         # coming from an iterator, writing to file
         if input_is_stream and not output_is_stream:
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): input is stream, output is file')
+                'helpers.call_bedtools(): input is stream, output is file')
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
+                'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
             outfile = open(tmpfn, 'w')
             p = subprocess.Popen(cmds,
                                  stdout=outfile,
@@ -390,10 +383,10 @@ def call_bedtools(cmds, tmpfn=None, stdin=None, check_stderr=None):
         # coming from a file, sending as iterator
         if not input_is_stream and output_is_stream:
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): input is filename, '
-                    'output is stream')
+                'helpers.call_bedtools(): input is filename, '
+                'output is stream')
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
+                'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
             p = subprocess.Popen(cmds,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE,
@@ -404,10 +397,10 @@ def call_bedtools(cmds, tmpfn=None, stdin=None, check_stderr=None):
         # file-to-file
         if not input_is_stream and not output_is_stream:
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): input is filename, output '
-                    'is filename (%s)', tmpfn)
+                'helpers.call_bedtools(): input is filename, output '
+                'is filename (%s)', tmpfn)
             pybedtools.logger.debug(
-                    'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
+                'helpers.call_bedtools(): cmds=%s', ' '.join(cmds))
             outfile = open(tmpfn, 'w')
             p = subprocess.Popen(cmds,
                                  stdout=outfile,
@@ -426,24 +419,20 @@ def call_bedtools(cmds, tmpfn=None, stdin=None, check_stderr=None):
                 stderr = None
 
         if stderr:
-            sys.stderr.write('\nCommand was:\n\n\t%s\n' % \
-                             subprocess.list2cmdline(cmds))
-            sys.stderr.write('\nError message was:\n')
-            sys.stderr.write(stderr)
-            raise BEDToolsError('Error message from BEDTools written to '
-                                'stderr, above', stderr)
+            raise BEDToolsError(subprocess.list2cmdline(cmds), stderr)
 
     except (OSError, IOError) as err:
         print '%s: %s' % (type(err), os.strerror(err.errno))
         print 'The command was:\n\n\t%s\n' % subprocess.list2cmdline(cmds)
 
-        problems = {2: ('* Did you spell the command correctly?',
-                        '* Do you have BEDTools installed and on the path?'),
-                    13: ('* Do you have permission to write '
-                         'to the output file ("%s")?' % tmpfn,),
-                    24: ('* Too many files open -- please submit '
-                         'a bug report so that this can be fixed',)
-                   }
+        problems = {
+            2: ('* Did you spell the command correctly?',
+                '* Do you have BEDTools installed and on the path?'),
+            13: ('* Do you have permission to write '
+                 'to the output file ("%s")?' % tmpfn,),
+            24: ('* Too many files open -- please submit '
+                 'a bug report so that this can be fixed',)
+        }
 
         print 'Things to check:'
         print '\n\t' + '\n\t'.join(problems[err.errno])
@@ -463,7 +452,7 @@ def set_bedtools_path(path=""):
     To reset and use the default system path, call this function with no
     arguments or use path="".
     """
-    pybedtools._bedtools_path = path
+    settings._bedtools_path = path
 
 
 def set_samtools_path(path=""):
@@ -475,7 +464,7 @@ def set_samtools_path(path=""):
 
     Use path="" to reset to default system path.
     """
-    pybedtools._samtools_path = path
+    settings._samtools_path = path
 
 
 def set_tabix_path(path=""):
@@ -487,7 +476,7 @@ def set_tabix_path(path=""):
 
     Use path="" to reset to default system path.
     """
-    pybedtools._tabix_path = path
+    settings._tabix_path = path
 
 
 def set_R_path(path=""):
@@ -499,7 +488,7 @@ def set_R_path(path=""):
 
     Use path="" to reset to default system path.
     """
-    pybedtools._R_path = path
+    settings._R_path = path
 
 
 def _check_sequence_stderr(x):
@@ -509,20 +498,98 @@ def _check_sequence_stderr(x):
     """
     if x.startswith('index file'):
         return True
+    if x.startswith("WARNING"):
+        return True
     return False
 
 
 def _call_randomintersect(_self, other, iterations, intersect_kwargs,
-        shuffle_kwargs, report_iterations, debug, _orig_processes):
+                          shuffle_kwargs, report_iterations, debug,
+                          _orig_processes):
     """
     Helper function that list-ifies the output from randomintersection, s.t.
     it can be pickled across a multiprocess Pool.
     """
-    return list(_self.randomintersection(other, iterations,
-                                        intersect_kwargs=intersect_kwargs,
-                                        shuffle_kwargs=shuffle_kwargs,
-                                        report_iterations=report_iterations,
-                                        debug=False, processes=None,
-                                        _orig_processes=_orig_processes))
+    return list(
+        _self.randomintersection(
+            other, iterations,
+            intersect_kwargs=intersect_kwargs,
+            shuffle_kwargs=shuffle_kwargs,
+            report_iterations=report_iterations,
+            debug=False, processes=None,
+            _orig_processes=_orig_processes)
+    )
+
+
+def close_or_delete(*args):
+    """
+    Single function that can be used to get rid of a BedTool, whether it's a
+    streaming or file-based version.
+    """
+    for x in args:
+        if isinstance(x.fn, basestring):
+            os.unlink(x.fn)
+        elif hasattr(x.fn, 'close'):
+            x.fn.close()
+
+
+def _jaccard_output_to_dict(s, **kwargs):
+    """
+    jaccard method doesn't return an interval file, rather, it returns a short
+    summary of results.  Here, we simply parse it into a dict for convenience.
+    """
+    if isinstance(s, basestring):
+        s = open(s).read()
+    if hasattr(s, 'next'):
+        s = ''.join(i for i in s)
+    header, data = s.splitlines()
+    header = header.split()
+    data = data.split()
+    data[0] = int(data[0])
+    data[1] = int(data[1])
+    data[2] = float(data[2])
+    data[3] = int(data[3])
+    return dict(zip(header, data))
+
+
+def _reldist_output_handler(s, **kwargs):
+    """
+    reldist, if called with -detail, returns a valid BED file with the relative
+    distance as the last field.  In that case, return the BedTool immediately.
+    If not -detail, then the results are a table, in which case here we parse
+    into a dict for convenience.
+    """
+    if 'detail' in kwargs:
+        return pybedtools.BedTool(s)
+    if isinstance(s, basestring):
+        iterable = open(s)
+    if hasattr(s, 'next'):
+        iterable = s
+    header = iterable.next().split()
+    results = {}
+    for h in header:
+        results[h] = []
+    for i in iterable:
+        reldist, count, total, fraction = i.split()
+        data = [
+            float(reldist),
+            int(count),
+            int(total),
+            float(fraction)
+        ]
+        for h, d in zip(header, data):
+            results[h].append(d)
+    return results
+
+
+def n_open_fds():
+    pid = os.getpid()
+    procs = subprocess.check_output(
+        ['lsof', '-w', '-Ff', '-p', str(pid)])
+    nprocs = 0
+    for i in procs.splitlines():
+        if i[1:].isdigit() and i[0] == 'f':
+            nprocs += 1
+    return nprocs
 
 atexit.register(cleanup)
